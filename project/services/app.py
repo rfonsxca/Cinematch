@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+import threading
 import os
 import secrets
 import sqlite3
@@ -15,6 +16,49 @@ from pathlib import Path
 ROLE = os.environ.get('ROLE', 'users')
 USERS = os.environ.get('USERS_URL', 'http://localhost:8001')
 DB = os.environ.get('DB_PATH', f'/data/{ROLE}.sqlite')
+
+
+# Métricas em memória no formato de texto do Prometheus (sem dependências externas).
+# Cada processo mantém as suas; o Prometheus recolhe-as por HTTP em GET /metrics.
+BUCKETS = (0.01, 0.05, 0.1, 0.5, 1, 5, 30, 120, 300)
+KNOWN_PATHS = {'/', '/health', '/metrics', '/register', '/login', '/me', '/profiles',
+               '/internal/profiles', '/internal/refresh'}
+METRICS_LOCK = threading.Lock()
+REQUESTS = {}      # (método, caminho, estado) -> contagem
+LATENCY = {}       # (método, caminho) -> [contagens por bucket..., soma, total]
+GENERATIONS = {'ok': 0, 'error': 0}
+
+
+def observe(method, path, status, seconds):
+    # Caminhos desconhecidos são agrupados em 'other' para não criar séries ilimitadas.
+    path = path if path in KNOWN_PATHS else 'other'
+    with METRICS_LOCK:
+        REQUESTS[(method, path, status)] = REQUESTS.get((method, path, status), 0) + 1
+        hist = LATENCY.setdefault((method, path), [0] * len(BUCKETS) + [0.0, 0])
+        for i, bound in enumerate(BUCKETS):
+            if seconds <= bound:
+                hist[i] += 1
+        hist[-2] += seconds
+        hist[-1] += 1
+
+
+def render_metrics():
+    lines = ['# TYPE http_requests_total counter']
+    with METRICS_LOCK:
+        for (m, p, st), n in sorted(REQUESTS.items()):
+            lines.append(f'http_requests_total{{service="{ROLE}",method="{m}",path="{p}",status="{st}"}} {n}')
+        lines.append('# TYPE http_request_duration_seconds histogram')
+        for (m, p), hist in sorted(LATENCY.items()):
+            lab = f'service="{ROLE}",method="{m}",path="{p}"'
+            for bound, n in zip(BUCKETS, hist):
+                lines.append(f'http_request_duration_seconds_bucket{{{lab},le="{bound}"}} {n}')
+            lines.append(f'http_request_duration_seconds_bucket{{{lab},le="+Inf"}} {hist[-1]}')
+            lines.append(f'http_request_duration_seconds_sum{{{lab}}} {hist[-2]}')
+            lines.append(f'http_request_duration_seconds_count{{{lab}}} {hist[-1]}')
+        lines.append('# TYPE llm_generations_total counter')
+        for outcome, n in GENERATIONS.items():
+            lines.append(f'llm_generations_total{{service="{ROLE}",outcome="{outcome}"}} {n}')
+    return ('\n'.join(lines) + '\n').encode()
 
 
 def request(url, body=None, headers=None, timeout=300):
@@ -66,11 +110,15 @@ def generate(user, prompt):
     })
     content = result['response'].strip()
     if not content:
+        with METRICS_LOCK:
+            GENERATIONS['error'] += 1
         raise ValueError('O modelo devolveu uma resposta vazia.')
     # Guardamos apenas a última resposta por utilizador, partilhada pelos dois modos de geração.
     with connect() as db:
         db.execute('INSERT OR REPLACE INTO recommendations VALUES (?, ?, ?)',
                    (user['id'], content, time.time()))
+    with METRICS_LOCK:
+        GENERATIONS['ok'] += 1
     return {'content': content}
 
 
@@ -85,6 +133,7 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_request()
 
     def send_json(self, status, body):
+        self.status = status  # guardado para a métrica de latência
         data = json.dumps(body, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -112,6 +161,24 @@ class Handler(BaseHTTPRequestHandler):
             raise PermissionError('Acesso interno recusado.')
 
     def handle_request(self):
+        start = time.perf_counter()
+        self.status = 500
+        try:
+            self.process()
+        finally:
+            observe(self.command, self.path.split('?')[0], self.status, time.perf_counter() - start)
+
+    def process(self):
+        if self.command == 'GET' and self.path.split('?')[0] == '/metrics':
+            # Sem autenticação: só deve ficar acessível dentro da rede interna (não exposto pelo Nginx).
+            data = render_metrics()
+            self.status = 200
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; version=0.0.4')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         try:
             # Limitar o corpo antes de o ler reduz o consumo de memória por pedido.
             length = int(self.headers.get('Content-Length', '0'))

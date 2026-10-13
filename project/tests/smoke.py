@@ -108,6 +108,11 @@ class Smoke(unittest.TestCase):
                 bob = call(users, '/register', {'username': 'bobby', 'password': 'secret123'})
                 # A cache de Alice não pode aparecer na sessão de outro utilizador.
                 self.assertEqual(call(recs, '/', token=bob['token'])['content'], '')
+                # O endpoint de métricas expõe contadores de pedidos e de gerações do modelo.
+                with urllib.request.urlopen(recs + '/metrics', timeout=10) as response:
+                    text = response.read().decode()
+                self.assertIn('http_requests_total{service="recommendations"', text)
+                self.assertIn('llm_generations_total{service="recommendations",outcome="ok"} 2', text)
                 # Reiniciar confirma que conta, sessão e perfil sobrevivem ao fim do processo.
                 for process in processes:
                     process.terminate()
