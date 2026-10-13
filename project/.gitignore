@@ -1,0 +1,7 @@
+# Excluir artefactos Python, segredos locais e dados gerados durante execução e testes.
+__pycache__/
+*.pyc
+.env
+data/
+*.sqlite*
+tmp*/
