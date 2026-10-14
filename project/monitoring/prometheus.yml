@@ -1,0 +1,8 @@
+# O Prometheus vai buscar (scrape) o /metrics de cada serviço de 5 em 5 segundos.
+global:
+  scrape_interval: 5s
+scrape_configs:
+  - job_name: users
+    static_configs: [{targets: ["users:8000"]}]
+  - job_name: recommendations
+    static_configs: [{targets: ["recommendations:8000"]}]

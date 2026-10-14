@@ -1,0 +1,125 @@
+{
+ "uid": "cinematch",
+ "title": "CineMatch",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "5s",
+ "time": {
+  "from": "now-15m",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "timeseries",
+   "title": "Pedidos por segundo",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (service, path) (rate(http_requests_total[1m]))",
+     "legendFormat": "{{service}} {{path}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "type": "timeseries",
+   "title": "Lat\u00eancia p95",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "histogram_quantile(0.95, sum by (le, service, path) (rate(http_request_duration_seconds_bucket[1m])))",
+     "legendFormat": "{{service}} {{path}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "type": "timeseries",
+   "title": "Erros (4xx/5xx) por segundo",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 8,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (service, status) (rate(http_requests_total{status=~\"4..|5..\"}[1m]))",
+     "legendFormat": "{{service}} {{status}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "type": "timeseries",
+   "title": "Gera\u00e7\u00f5es do modelo (LLM)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 8,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (outcome) (rate(llm_generations_total[5m]))",
+     "legendFormat": "{{outcome}}",
+     "refId": "A"
+    }
+   ]
+  }
+ ]
+}
