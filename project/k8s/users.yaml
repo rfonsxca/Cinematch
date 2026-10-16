@@ -1,0 +1,61 @@
+# Serviço de utilizadores: o SQLite vive num PVC. Com ReadWriteOnce e uma só réplica,
+# a estratégia Recreate evita dois pods a disputar o mesmo volume durante uma atualização.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: users-data
+  namespace: cinematch
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: users
+  namespace: cinematch
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: users}
+  template:
+    metadata:
+      labels: {app: users}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: users
+          image: cinematch-services
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 8000}]
+          env:
+            - {name: ROLE, value: users}
+            - name: INTERNAL_KEY
+              valueFrom: {secretKeyRef: {name: app-secret, key: INTERNAL_KEY}}
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 10
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: users-data}
+---
+# O nome "users" é o que o Nginx do frontend e o serviço de recomendações usam.
+apiVersion: v1
+kind: Service
+metadata:
+  name: users
+  namespace: cinematch
+spec:
+  selector: {app: users}
+  ports: [{port: 8000, targetPort: 8000}]

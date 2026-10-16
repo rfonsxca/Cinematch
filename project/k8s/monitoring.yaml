@@ -1,0 +1,87 @@
+# Prometheus e Grafana. As configurações vêm de ConfigMaps gerados pelo kustomization.yaml a partir de
+# ../monitoring (as mesmas que o Compose usa), para existir uma só fonte de verdade.
+# Ambos são ClusterIP: aceder com "kubectl -n cinematch port-forward svc/grafana 3000:3000".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: cinematch
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: prometheus}
+  template:
+    metadata:
+      labels: {app: prometheus}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.15.0
+          ports: [{containerPort: 9090}]
+          readinessProbe:
+            httpGet: {path: /-/ready, port: 9090}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus/prometheus.yml, subPath: prometheus.yml}
+      volumes:
+        - name: config
+          configMap: {name: prometheus-config}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: cinematch
+spec:
+  selector: {app: prometheus}
+  ports: [{port: 9090, targetPort: 9090}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: cinematch
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: grafana}
+  template:
+    metadata:
+      labels: {app: grafana}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: grafana
+          image: grafana/grafana:13.2.4
+          ports: [{containerPort: 3000}]
+          env:
+            - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "true"}
+            - {name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: Viewer}
+          readinessProbe:
+            httpGet: {path: /api/health, port: 3000}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: datasource, mountPath: /etc/grafana/provisioning/datasources}
+            - {name: dashboard-provider, mountPath: /etc/grafana/provisioning/dashboards}
+            - {name: dashboards, mountPath: /var/lib/grafana/dashboards}
+      volumes:
+        - name: datasource
+          configMap: {name: grafana-datasource}
+        - name: dashboard-provider
+          configMap: {name: grafana-dashboard-provider}
+        - name: dashboards
+          configMap: {name: grafana-dashboards}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: cinematch
+spec:
+  selector: {app: grafana}
+  ports: [{port: 3000, targetPort: 3000}]

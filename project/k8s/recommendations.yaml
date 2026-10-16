@@ -1,0 +1,92 @@
+# Serviço de recomendações (com a sua própria base de dados) e o worker que prepara a cache.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: recommendations-data
+  namespace: cinematch
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommendations
+  namespace: cinematch
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: recommendations}
+  template:
+    metadata:
+      labels: {app: recommendations}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: recommendations
+          image: cinematch-services
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 8000}]
+          env:
+            - {name: ROLE, value: recommendations}
+            - {name: USERS_URL, value: "http://users:8000"}
+            - {name: OLLAMA_URL, value: "http://ollama:11434"}
+            - name: MODEL
+              valueFrom: {configMapKeyRef: {name: app-config, key: MODEL}}
+            - name: INTERNAL_KEY
+              valueFrom: {secretKeyRef: {name: app-secret, key: INTERNAL_KEY}}
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 10
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: recommendations-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recommendations
+  namespace: cinematch
+spec:
+  selector: {app: recommendations}
+  ports: [{port: 8000, targetPort: 8000}]
+---
+# O worker só fala HTTP com "recommendations"; não precisa de volume nem de Service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: cinematch
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: worker}
+  template:
+    metadata:
+      labels: {app: worker}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: worker
+          image: cinematch-services
+          imagePullPolicy: IfNotPresent
+          command: ["python", "worker.py"]
+          env:
+            - {name: RECOMMENDATIONS_URL, value: "http://recommendations:8000"}
+            - {name: WORKER_INTERVAL, value: "300"}
+            - name: INTERNAL_KEY
+              valueFrom: {secretKeyRef: {name: app-secret, key: INTERNAL_KEY}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
