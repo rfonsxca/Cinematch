@@ -1,0 +1,36 @@
+# Único ponto de entrada. Publicado como NodePort para ser acessível pelo IP de qualquer nó
+# (a regra de firewall na GCP tem de abrir esta porta).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: cinematch
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: frontend}
+  template:
+    metadata:
+      labels: {app: frontend}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: frontend
+          image: cinematch-frontend
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 80}]
+          readinessProbe:
+            httpGet: {path: /, port: 80}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: cinematch
+spec:
+  type: NodePort
+  selector: {app: frontend}
+  ports: [{port: 80, targetPort: 80, nodePort: 30080}]

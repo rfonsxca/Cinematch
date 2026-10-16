@@ -1,0 +1,17 @@
+# Versão menor do Kubernetes (repositório pkgs.k8s.io). Atualizar aqui, num único sítio.
+k8s_minor: "v1.35"
+# O CIDR dos pods tem de coincidir com o "Network" do manifesto do Flannel (10.244.0.0/16).
+pod_cidr: "10.244.0.0/16"
+flannel_version: "v0.28.10"
+local_path_version: "v0.0.37"
+
+# Repositório (público) no Docker Hub onde estão as imagens da app. As duas imagens partilham o repositório
+# e distinguem-se pela tag (o Docker Hub gratuito só dá 1 repositório privado).
+image_repo: "docker.io/joaoccardosoo54/cinematch"
+services_tag: "services-v1"
+frontend_tag: "frontend-v1"
+# Só necessárias se o repositório for privado: credenciais de LEITURA (access token do Docker Hub).
+# Passar com -e na linha de comandos; nunca guardar no Git.
+registry_server: "https://index.docker.io/v1/"
+registry_username: ""
+registry_password: ""

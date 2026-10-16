@@ -1,0 +1,9 @@
+# Configuração não secreta partilhada pelos serviços. O segredo INTERNAL_KEY fica no Secret "app-secret",
+# criado fora do repositório (ver secret.example.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: cinematch
+data:
+  MODEL: "qwen2.5:0.5b"

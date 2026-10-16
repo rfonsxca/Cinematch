@@ -5,3 +5,14 @@ __pycache__/
 data/
 *.sqlite*
 tmp*/
+
+# Infraestrutura: estado do Terraform, inventário gerado e credenciais nunca vão para o Git.
+infra/terraform/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+infra/ansible/inventory.ini
+*-key.json
+key.json
+.gcp/
+tfplan

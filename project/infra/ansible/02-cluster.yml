@@ -1,0 +1,72 @@
+---
+# Cria o control plane, instala a rede de pods e o armazenamento, e junta os workers.
+- name: Control plane
+  hosts: master
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: kubeadm init
+      ansible.builtin.command: "kubeadm init --pod-network-cidr={{ pod_cidr }}"
+      args:
+        creates: /etc/kubernetes/admin.conf
+
+    - name: Pasta .kube do utilizador ubuntu
+      ansible.builtin.file:
+        path: /home/ubuntu/.kube
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+
+    - name: kubeconfig do utilizador ubuntu
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/ubuntu/.kube/config
+        remote_src: true
+        owner: ubuntu
+        group: ubuntu
+        mode: "0600"
+
+    - name: Rede de pods (Flannel)
+      ansible.builtin.command: "kubectl apply -f https://github.com/flannel-io/flannel/releases/download/{{ flannel_version }}/kube-flannel.yml"
+      changed_when: false
+
+    - name: Comando de join para os workers
+      ansible.builtin.command: kubeadm token create --print-join-command
+      register: join_cmd
+      changed_when: false
+
+    - name: Guardar o comando de join
+      ansible.builtin.set_fact:
+        join_command: "{{ join_cmd.stdout }}"
+
+- name: Workers
+  hosts: workers
+  become: true
+  tasks:
+    - name: Juntar ao cluster
+      ansible.builtin.command: "{{ hostvars[groups['master'][0]].join_command }}"
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+
+- name: Armazenamento e verificação
+  hosts: master
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Esperar que todos os nós fiquem Ready
+      ansible.builtin.command: kubectl wait --for=condition=Ready node --all --timeout=300s
+      changed_when: false
+
+    # O kubeadm não traz StorageClass; sem ela os PVCs da app ficariam em Pending.
+    - name: Provisionador de volumes locais
+      ansible.builtin.command: "kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/{{ local_path_version }}/deploy/local-path-storage.yaml"
+      changed_when: false
+
+    - name: Tornar local-path a StorageClass por omissão
+      ansible.builtin.command: >
+        kubectl patch storageclass local-path
+        -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+      changed_when: false

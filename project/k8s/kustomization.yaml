@@ -1,0 +1,33 @@
+# Aplicar com:
+#   kubectl kustomize --load-restrictor=LoadRestrictionsNone k8s | kubectl apply -f -
+# (a flag é necessária porque os ConfigMaps de monitorização leem ficheiros de ../monitoring).
+# O Secret "app-secret" tem de existir antes (ver secret.example.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cinematch
+resources:
+  - namespace.yaml
+  - config.yaml
+  - users.yaml
+  - recommendations.yaml
+  - ollama.yaml
+  - frontend.yaml
+  - monitoring.yaml
+# Os nomes das imagens do projeto são substituídos aqui pelo registo escolhido, por exemplo:
+#   cd k8s && kustomize edit set image cinematch-services=REGISTRY/cinematch-services:TAG
+images:
+  - name: cinematch-services
+    newName: cinematch-services
+    newTag: dev
+  - name: cinematch-frontend
+    newName: cinematch-frontend
+    newTag: dev
+configMapGenerator:
+  - name: prometheus-config
+    files: [prometheus.yml=../monitoring/prometheus.yml]
+  - name: grafana-datasource
+    files: [prometheus.yml=../monitoring/grafana/provisioning/datasources/prometheus.yml]
+  - name: grafana-dashboard-provider
+    files: [dashboards.yml=../monitoring/grafana/provisioning/dashboards/dashboards.yml]
+  - name: grafana-dashboards
+    files: [cinematch.json=../monitoring/grafana/dashboards/cinematch.json]

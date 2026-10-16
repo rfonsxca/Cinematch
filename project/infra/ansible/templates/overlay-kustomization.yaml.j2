@@ -1,0 +1,12 @@
+# Gerado pelo Ansible: aponta as imagens da app para o repositório privado (uma tag por imagem).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../k8s
+images:
+  - name: cinematch-services
+    newName: {{ image_repo }}
+    newTag: "{{ services_tag }}"
+  - name: cinematch-frontend
+    newName: {{ image_repo }}
+    newTag: "{{ frontend_tag }}"
