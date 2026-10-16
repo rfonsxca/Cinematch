@@ -1,7 +1,7 @@
 services:
   # Único ponto publicado no anfitrião; os restantes serviços comunicam na rede do Compose.
   frontend:
-    image: nginx:stable-alpine
+    image: nginx:1.28-alpine
     ports: ["8080:80"]
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
@@ -40,16 +40,16 @@ services:
       WORKER_INTERVAL: "300"
     depends_on: [recommendations]
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.3
     volumes: ["models:/root/.ollama"]
   # Monitorização: Prometheus recolhe as métricas; Grafana mostra o dashboard (http://localhost:3000, admin/admin).
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.15.0
     ports: ["9090:9090"]
     volumes: ["./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
     depends_on: [users, recommendations]
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.2.4
     ports: ["3000:3000"]
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
