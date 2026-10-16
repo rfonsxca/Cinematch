@@ -1,0 +1,4 @@
+---
+- import_playbook: 01-nodes.yml
+- import_playbook: 02-cluster.yml
+- import_playbook: 03-app.yml

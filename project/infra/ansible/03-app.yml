@@ -1,0 +1,77 @@
+---
+# Faz o deploy da aplicação a partir dos manifests em project/k8s.
+# As imagens (repositório público no Docker Hub) têm de estar publicadas. Se o repositório for privado,
+# passar também -e registry_username=... -e registry_password=... (token de leitura).
+- name: Deploy da aplicação
+  hosts: master
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  vars:
+    app_dir: /home/ubuntu/cinematch
+    project_dir: "{{ playbook_dir }}/../.."
+  tasks:
+    - name: Repositório de imagens definido
+      ansible.builtin.assert:
+        that: image_repo | length > 0
+        fail_msg: "Define image_repo em group_vars/all.yml."
+
+    - name: Pastas no master
+      ansible.builtin.file:
+        path: "{{ app_dir }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: [k8s, monitoring, overlay]
+
+    - name: Copiar manifests
+      ansible.builtin.copy:
+        src: "{{ project_dir }}/k8s/"
+        dest: "{{ app_dir }}/k8s/"
+        mode: "0644"
+        directory_mode: "0755"
+
+    - name: Copiar configuração de monitorização
+      ansible.builtin.copy:
+        src: "{{ project_dir }}/monitoring/"
+        dest: "{{ app_dir }}/monitoring/"
+        mode: "0644"
+        directory_mode: "0755"
+
+    - name: Overlay com o registo de imagens
+      ansible.builtin.template:
+        src: overlay-kustomization.yaml.j2
+        dest: "{{ app_dir }}/overlay/kustomization.yaml"
+        mode: "0644"
+
+    - name: Namespace
+      ansible.builtin.command: "kubectl apply -f {{ app_dir }}/k8s/namespace.yaml"
+      changed_when: false
+
+    # O segredo é gerado no cluster e nunca passa pelo Git; só é criado se ainda não existir.
+    - name: Segredo INTERNAL_KEY
+      ansible.builtin.shell: |
+        kubectl -n cinematch get secret app-secret >/dev/null 2>&1 ||
+        kubectl -n cinematch create secret generic app-secret --from-literal=INTERNAL_KEY="$(openssl rand -hex 32)"
+      changed_when: false
+
+    - name: Credenciais do registo (só se o repositório for privado)
+      ansible.builtin.shell: |
+        kubectl -n cinematch delete secret registry-cred --ignore-not-found
+        kubectl -n cinematch create secret docker-registry registry-cred \
+          --docker-server={{ registry_server }} \
+          --docker-username={{ registry_username }} --docker-password={{ registry_password }}
+        kubectl -n cinematch patch serviceaccount default -p '{"imagePullSecrets":[{"name":"registry-cred"}]}'
+      when: registry_username | length > 0
+      no_log: true
+      changed_when: false
+
+    - name: Aplicar a aplicação
+      ansible.builtin.shell: >
+        kubectl kustomize --load-restrictor=LoadRestrictionsNone {{ app_dir }}/overlay |
+        kubectl apply -f -
+      changed_when: false
+
+    - name: Esperar pelos deployments
+      ansible.builtin.command: "kubectl -n cinematch rollout status deployment/{{ item }} --timeout=900s"
+      loop: [users, recommendations, worker, frontend, prometheus, grafana, ollama]
+      changed_when: false

@@ -1,0 +1,12 @@
+# Gerado pelo Terraform (infra/terraform). Não editar nem versionar.
+[master]
+k8s-master ansible_host=${master_ip}
+
+[workers]
+%{ for name, ip in workers ~}
+${name} ansible_host=${ip}
+%{ endfor ~}
+
+[all:vars]
+ansible_user=ubuntu
+ansible_ssh_private_key_file=/keys/psia-gcp
