@@ -52,6 +52,11 @@ class Model(BaseHTTPRequestHandler):
     def do_POST(self):
         data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         assert data['stream'] is False
+        if 'FAIL' in data['prompt']:
+            # Simula uma falha do modelo para um utilizador específico.
+            self.send_response(500)
+            self.end_headers()
+            return
         self.send_response(200)
         self.end_headers()
         self.wfile.write(json.dumps({'response': 'TEST STUB: Arrival (2016)'}).encode())
@@ -113,6 +118,19 @@ class Smoke(unittest.TestCase):
                     text = response.read().decode()
                 self.assertIn('http_requests_total{service="recommendations"', text)
                 self.assertIn('llm_generations_total{service="recommendations",outcome="ok"} 2', text)
+                # Alterar os interesses invalida a cache: o ciclo seguinte volta a gerar só para Alice.
+                call(users, '/me', {'interests': 'Drama'}, token, 'PUT')
+                self.assertEqual(call(recs, '/internal/refresh', {}, internal=True)['refreshed'], 1)
+                self.assertEqual(call(recs, '/internal/refresh', {}, internal=True)['refreshed'], 0)
+                # Uma falha do modelo para Carol não impede que Dave receba recomendações.
+                for name, interests in [('carol', 'FAIL'), ('dave1', 'Comedy')]:
+                    user = call(users, '/register', {'username': name, 'password': 'secret123'})
+                    call(users, '/me', {'interests': interests}, user['token'], 'PUT')
+                result = call(recs, '/internal/refresh', {}, internal=True)
+                self.assertEqual((result['refreshed'], result['failed']), (1, 1))
+                with urllib.request.urlopen(recs + '/metrics', timeout=10) as response:
+                    self.assertIn('llm_generations_total{service="recommendations",outcome="error"} 1',
+                                  response.read().decode())
                 # Reiniciar confirma que conta, sessão e perfil sobrevivem ao fim do processo.
                 for process in processes:
                     process.terminate()
@@ -131,7 +149,7 @@ class Smoke(unittest.TestCase):
                         time.sleep(.05)
                 else:
                     self.fail('Restart failed')
-                self.assertEqual(result['interests'], 'Science fiction')
+                self.assertEqual(result['interests'], 'Drama')
             finally:
                 for process in processes:
                     process.terminate()
