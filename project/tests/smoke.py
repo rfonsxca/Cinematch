@@ -10,6 +10,8 @@ from contextlib import contextmanager
 import threading
 import time
 import unittest
+from unittest.mock import patch
+import persistence
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -131,16 +133,40 @@ class Smoke(unittest.TestCase):
                 with urllib.request.urlopen(recs + '/metrics', timeout=10) as response:
                     self.assertIn('llm_generations_total{service="recommendations",outcome="error"} 1',
                                   response.read().decode())
-                # Reiniciar confirma que conta, sessão e perfil sobrevivem ao fim do processo.
+                # Exercitar a ferramenta de prova com serviços reais; só o modelo é simulado.
+                # O adaptador substitui o proxy Nginx, que este teste não executa.
+                def public_call(base, service, path, body=None, token='', method=None):
+                    return call(users if service == 'users' else recs, '/' + path,
+                                body, token, method)
+
+                state_path = Path(tmp) / 'persistence.json'
+                with patch.object(persistence, 'call', side_effect=public_call), \
+                        patch.object(persistence.getpass, 'getpass', return_value='proof-secret123'):
+                    persistence.prepare('http://test-frontend', state_path)
+                    persistence.verify(None, state_path)
+                    # Recusar substituir a prova original.
+                    with self.assertRaises(FileExistsError):
+                        persistence.prepare('http://test-frontend', state_path)
+
+                # Reiniciar ambos confirma também a persistência da base de recomendações.
                 for process in processes:
                     process.terminate()
                     process.wait()
                 processes.clear()
-                env['ROLE'] = 'users'
-                env['PORT'] = users.rsplit(':', 1)[1]
-                env['DB_PATH'] = str(Path(tmp) / 'users.sqlite')
-                processes.append(subprocess.Popen([sys.executable, str(ROOT / 'services/app.py')], env=env,
-                                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+                for role, base in [('users', users), ('recommendations', recs)]:
+                    env['ROLE'] = role
+                    env['PORT'] = base.rsplit(':', 1)[1]
+                    env['DB_PATH'] = str(Path(tmp) / f'{role}.sqlite')
+                    processes.append(subprocess.Popen([sys.executable, str(ROOT / 'services/app.py')], env=env,
+                                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+                    for _ in range(100):
+                        try:
+                            call(base, '/health')
+                            break
+                        except urllib.error.URLError:
+                            time.sleep(.05)
+                    else:
+                        self.fail(f'{role} did not restart')
                 for _ in range(100):
                     try:
                         result = call(users, '/me', token=token)
@@ -150,6 +176,15 @@ class Smoke(unittest.TestCase):
                 else:
                     self.fail('Restart failed')
                 self.assertEqual(result['interests'], 'Drama')
+                with patch.object(persistence, 'call', side_effect=public_call), \
+                        patch.object(persistence.getpass, 'getpass', return_value='proof-secret123'):
+                    persistence.verify(None, state_path)
+                    # Uma resposta regenerada não pode ser confundida com a cache original.
+                    saved = json.loads(state_path.read_text(encoding='utf-8'))
+                    saved['recommendation']['created'] = 0
+                    state_path.write_text(json.dumps(saved), encoding='utf-8')
+                    with self.assertRaises(ValueError):
+                        persistence.verify(None, state_path)
             finally:
                 for process in processes:
                     process.terminate()
