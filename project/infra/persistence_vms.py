@@ -81,8 +81,10 @@ class Cloud:
         """Constrói e executa comandos gcloud. Valida se o verbo pertence a SAFE_VERBS."""
         if verb not in SAFE_VERBS:
             raise ValueError(f'Operação não permitida: {verb}')
+        # 'instances list' só aceita --zones (no plural); os restantes verbos usam --zone.
+        zone_flag = '--zones' if verb == 'list' else '--zone'
         args = [self.gcloud, 'compute', 'instances', verb, *extra,
-                '--project', self.project, '--zone', self.zone, '--quiet']
+                '--project', self.project, zone_flag, self.zone, '--quiet']
         if verb in ('describe', 'list'):
             args.append('--format=json')
         code, out, err = self.runner(args, self.command_timeout)

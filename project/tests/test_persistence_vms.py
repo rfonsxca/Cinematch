@@ -53,6 +53,9 @@ class FakeGcloud:
         if verb in self.failures:
             return 1, '', self.failures[verb]
         if verb == 'list':
+            # Imita a CLI real: 'instances list' rejeita --zone (só aceita --zones).
+            if '--zone' in rest:
+                return 2, '', "ERROR: (gcloud.compute.instances.list) unrecognized arguments: --zone (did you mean '--zones'?)"
             wanted = rest[rest.index('--filter') + 1].split('=', 1)[1]
             return 0, json.dumps([{'name': n} for n, v in self.vms.items() if wanted in v['tags']]), ''
         if verb == 'describe':
